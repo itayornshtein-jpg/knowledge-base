@@ -1,13 +1,49 @@
+:root {
+  color-scheme: light;
+  --page-bg: #f7f9ff;
+  --navy: #241b57;
+  --navy-soft: #4f4b70;
+  --blue: #2f6df6;
+  --blue-soft: #eaf2ff;
+  --mint: #5ee58d;
+  --mint-soft: #e7ffef;
+  --lilac: #efe8ff;
+  --line: rgba(36, 27, 87, 0.1);
+  --card: rgba(255, 255, 255, 0.84);
+  background:
+    radial-gradient(circle at 22% 10%, rgba(142, 220, 255, 0.2), transparent 28%),
+    radial-gradient(circle at 82% 16%, rgba(194, 173, 255, 0.18), transparent 24%),
+    linear-gradient(135deg, #ffffff 0%, #f4fbff 48%, #f8f1ff 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
+  min-width: 320px;
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  background: transparent;
+  color: var(--navy);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+a {
+  color: inherit;
+}
+
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
