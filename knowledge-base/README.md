@@ -1,70 +1,121 @@
-# Getting Started with Create React App
+# Knowledge Base
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A support-team knowledge base with AI-powered search, JIRA/Salesforce links, and a terminal CLI. React 19 frontend, FastAPI backend, PostgreSQL.
 
-## Available Scripts
+See [CLAUDE.md](./CLAUDE.md) for the full architecture overview.
 
-In the project directory, you can run:
+---
 
-### `npm start`
+## Running locally
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+```bash
+# Recommended — Docker brings up db, backend, and frontend
+docker-compose up --build
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+# App:        http://localhost:3000
+# API docs:   http://localhost:8000/api/docs
+```
 
-### `npm test`
+Manual setup (three terminals):
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+# 1) database
+docker-compose up db
 
-### `npm run build`
+# 2) backend
+pip install -r requirements.txt
+uvicorn backend.main:app --reload --port 8000
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+# 3) frontend
+npm install
+npm start
+```
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+---
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+## `kb-cli` — manage pages from the terminal
 
-### `npm run eject`
+`scripts/kb_cli.py` is a stdlib-only Python script that talks to the FastAPI backend. No extra dependencies needed.
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+### Setup
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+```bash
+chmod +x scripts/kb_cli.py
+alias kb='python3 /full/path/to/scripts/kb_cli.py'
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+# Defaults to http://localhost:8000 — override if needed:
+export KB_API_BASE=http://localhost:8000
+export KB_API_TOKEN=...      # only if backend auth is enabled
+export EDITOR=vim            # vim / nano / code -w …
+```
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+### Commands
 
-## Learn More
+| Command | Purpose |
+|---|---|
+| `kb list` | List active pages |
+| `kb list --view archived` | List archived pages |
+| `kb list --view all --search sso` | Search across summary / case / description / solution |
+| `kb list --category <uuid>` | Filter by category |
+| `kb show <id>` | Render one page in the terminal |
+| `kb show <id> --json` | Same, but raw JSON |
+| `kb new` | Open `$EDITOR` with a JSON template, save to create |
+| `kb new --file page.json` | Create from a JSON file |
+| `kb new --stdin` | Create from piped JSON |
+| `kb edit <id>` | Open `$EDITOR` pre-filled with current values |
+| `kb archive <id>` | Soft-delete |
+| `kb restore <id>` | Un-archive |
+| `kb ask "<question>"` | Query the AI assistant |
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+Aliases: `ls` for `list`, `cat` for `show`, `add` for `new`, `rm` for `archive`.
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+### Quick examples
 
-### Code Splitting
+```bash
+# Search and pick an id, then read it
+kb ls --search "login fails"
+kb show 7a3c1f9e8d2b
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+# Edit interactively
+kb edit 7a3c1f9e8d2b           # opens $EDITOR; save & close to commit
 
-### Analyzing the Bundle Size
+# Pipe in a structured page
+cat <<'EOF' | kb new --stdin
+{
+  "summary": "DNS resolution flapping on east-1 cluster",
+  "sf_case": "00125501",
+  "jira_link": "https://jira.company.com/browse/OPS-882",
+  "description": "Pods intermittently fail to resolve service hostnames.",
+  "solution": "1. Restart coredns deployment.\n2. Verify NetworkPolicy.\n3. Re-test.",
+  "related_page_ids": []
+}
+EOF
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+# Ask the assistant
+kb ask "what causes 5xx after a region failover?"
+```
 
-### Making a Progressive Web App
+The `edit` command writes a JSON template to a temp file, opens it in `$EDITOR`, and `PUT`s the result on save. Leave the file unchanged (or empty) to abort.
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+---
 
-### Advanced Configuration
+## React `npm` scripts
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+| Script | Description |
+|---|---|
+| `npm start` | Dev server at http://localhost:3000 |
+| `npm test` | Jest in watch mode |
+| `npm run build` | Production build into `build/` |
 
-### Deployment
+---
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
+## Layout overview
 
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+```
+backend/         FastAPI app (main.py, routers, models, schemas)
+src/             React app — components/, hooks/, App.js
+scripts/         CLI utilities (kb_cli.py, migrate_from_json.py)
+docker-compose.yml
+Dockerfile
+db.json          (legacy seed data for migrate_from_json.py)
+```

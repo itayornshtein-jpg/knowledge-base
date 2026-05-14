@@ -1,0 +1,16 @@
+node_modules/
+.git/
+.env
+*.env.*
+!.env.example
+__pycache__/
+*.pyc
+.venv/
+venv/
+/coverage
+db.json
+*.md
+.DS_Store
+.gitlab-ci.yml
+scripts/
+tests/

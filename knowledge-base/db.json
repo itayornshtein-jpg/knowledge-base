@@ -7,6 +7,7 @@
     "description": "asfas",
     "solution": "asdasd",
     "related_page_ids": [],
+    "images": [],
     "deleted_at": "2026-05-14T13:49:06.643899+00:00"
   },
   {
@@ -17,6 +18,7 @@
     "description": "customer complained that 5-10% of all actions are not getting executed. He said it's across all clusters.",
     "solution": "Check for the size of the actions, if they are small, the RS action maker will just skip them. \nIn Pod Rightsizing, recommendations and actions are related but not identical.\n\nA new optimization action should come from a recommendation run that found something actionable.\n\nBut an Action object can remain in Active state even when the current run has nothing new to optimize.\n\nSo seeing an Action does not always mean \u201cthere is a new optimization to apply right now\u201d -it can also represent an already-managed workload or a previously applied optimization state.",
     "related_page_ids": [],
+    "images": [],
     "deleted_at": null
   }
 ]

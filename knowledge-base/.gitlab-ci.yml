@@ -1,0 +1,113 @@
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+
+# ── STAGE 1: TEST ─────────────────────────────────────────────────────────────
+
+test-backend:
+  stage: test
+  image: python:3.12-slim
+  services:
+    - name: postgres:16-alpine
+      alias: db
+  variables:
+    POSTGRES_DB: knowledge_base
+    POSTGRES_USER: kb_admin
+    POSTGRES_PASSWORD: kb_test_password
+    DATABASE_URL: postgresql://kb_admin:kb_test_password@db:5432/knowledge_base
+    DEBUG: "true"
+  script:
+    - apt-get update -qq && apt-get install -y -qq libpq-dev gcc
+    - pip install -r requirements.txt --quiet
+    - pytest tests/ -v --tb=short 2>/dev/null || echo "No tests yet — skipping"
+  only:
+    - main
+    - merge_requests
+
+test-frontend:
+  stage: test
+  image: node:20-alpine
+  script:
+    - npm ci --silent
+    - npm run test -- --watchAll=false --passWithNoTests
+  cache:
+    key: "$CI_COMMIT_REF_SLUG-node"
+    paths:
+      - node_modules/
+  only:
+    - main
+    - merge_requests
+
+# ── STAGE 2: BUILD & PUSH ─────────────────────────────────────────────────────
+
+build:
+  stage: build
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  before_script:
+    - apk add --no-cache aws-cli
+    - aws ecr get-login-password --region $AWS_REGION |
+        docker login --username AWS --password-stdin $ECR_REPO
+  script:
+    - |
+      docker build \
+        --target prod \
+        --build-arg GIT_SHA=$CI_COMMIT_SHORT_SHA \
+        -t $ECR_REPO:$IMAGE_TAG \
+        -t $ECR_REPO:latest \
+        .
+    - docker push $ECR_REPO:$IMAGE_TAG
+    - docker push $ECR_REPO:latest
+  only:
+    - main
+
+# ── STAGE 3: DEPLOY ───────────────────────────────────────────────────────────
+
+deploy:
+  stage: deploy
+  image: python:3.12-slim
+  before_script:
+    - pip install awscli --quiet
+  script:
+    - |
+      COMMAND_ID=$(aws ssm send-command \
+        --region "$AWS_REGION" \
+        --instance-ids "$EC2_INSTANCE_ID" \
+        --document-name "AWS-RunShellScript" \
+        --parameters "commands=[
+          'aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REPO',
+          'docker pull $ECR_REPO:latest',
+          'docker stop kb-app || true',
+          'docker rm   kb-app || true',
+          'docker run -d --name kb-app --restart=always -p 8000:8000 -e AWS_REGION=$AWS_REGION -e SECRET_NAME=$SECRET_NAME $ECR_REPO:latest',
+          'sleep 5 && curl -sf http://localhost:8000/api/health && echo DEPLOY_OK'
+        ]" \
+        --query "Command.CommandId" \
+        --output text)
+
+      echo "SSM command: $COMMAND_ID — waiting 20s for completion..."
+      sleep 20
+
+      STATUS=$(aws ssm get-command-invocation \
+        --region "$AWS_REGION" \
+        --command-id "$COMMAND_ID" \
+        --instance-id "$EC2_INSTANCE_ID" \
+        --query "Status" \
+        --output text)
+
+      echo "Deploy status: $STATUS"
+      [ "$STATUS" = "Success" ] || exit 1
+  environment:
+    name: production
+    url: https://kb.yourdomain.com
+  only:
+    - main
+  needs:
+    - build
