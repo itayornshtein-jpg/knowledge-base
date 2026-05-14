@@ -72,6 +72,7 @@ const activeEntry = {
   description: 'Users are sent back to the login page after the redirect.',
   solution: 'Reset the tenant certificate.\nSync the IdP metadata.',
   related_page_ids: [],
+  images: [],
   deleted_at: null,
 };
 
@@ -83,10 +84,33 @@ const archivedEntry = {
   description: 'An older archived fix.',
   solution: 'Do not use.',
   related_page_ids: [],
+  images: [],
   deleted_at: '2026-05-13T00:00:00+00:00',
 };
 
+const imageEntry = {
+  id: 'page-3',
+  summary: 'Screenshot-heavy article',
+  sf_case: '00130000',
+  jira_link: '',
+  description: 'This article has screenshots.',
+  solution: 'Follow the visual guide.',
+  related_page_ids: [],
+  images: ['data:image/png;base64,testimage'],
+  deleted_at: null,
+};
+
+let popupMock;
+
 beforeEach(() => {
+  popupMock = {
+    document: {
+      write: jest.fn(),
+      close: jest.fn(),
+    },
+    focus: jest.fn(),
+  };
+  window.open = jest.fn(() => popupMock);
   window.confirm = jest.fn(() => true);
   window.scrollTo = jest.fn();
 });
@@ -106,9 +130,12 @@ test('renders related page selector and saves references on a new page', async (
   render(<App />);
 
   expect(
-    await screen.findByRole('heading', { name: /SSO redirect loop/i })
+    await screen.findByRole('button', { name: /Open knowledge page SSO redirect loop/i })
   ).toBeInTheDocument();
   expect(screen.queryByText(/Archived reference page/i)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/Summary/i)).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: /Add new page/i }));
 
   await userEvent.type(screen.getByLabelText(/Summary/i), 'MFA enrollment timeout');
   await userEvent.type(screen.getByLabelText(/Salesforce Case/i), '00120000');
@@ -120,17 +147,16 @@ test('renders related page selector and saves references on a new page', async (
     screen.getByLabelText(/Resolution steps/i),
     'Clear the pending MFA challenge.'
   );
-  await userEvent.click(screen.getByLabelText(/SSO redirect loop/i));
+  await userEvent.click(screen.getByRole('checkbox', { name: /SSO redirect loop/i }));
   await userEvent.click(screen.getByRole('button', { name: /Save knowledge page/i }));
 
   await waitFor(() => {
     expect(
-      screen.getByRole('heading', { name: /MFA enrollment timeout/i })
+      screen.getByRole('button', { name: /Open knowledge page MFA enrollment timeout/i })
     ).toBeInTheDocument();
   });
 
-  expect(screen.getByText(/1 linked/i)).toBeInTheDocument();
-  expect(screen.getAllByText(/SSO redirect loop/i).length).toBeGreaterThan(1);
+  expect(screen.getByRole('button', { name: /Open knowledge page SSO redirect loop/i })).toBeInTheDocument();
 });
 
 test('archives and restores pages through the filters', async () => {
@@ -144,7 +170,7 @@ test('archives and restores pages through the filters', async () => {
   render(<App />);
 
   expect(
-    await screen.findByRole('heading', { name: /SSO redirect loop/i })
+    await screen.findByRole('button', { name: /Open knowledge page SSO redirect loop/i })
   ).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: /Delete page/i }));
 
@@ -159,7 +185,7 @@ test('archives and restores pages through the filters', async () => {
   await userEvent.click(screen.getByRole('button', { name: /Active/i }));
 
   await waitFor(() => {
-    expect(screen.getByRole('heading', { name: /SSO redirect loop/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open knowledge page SSO redirect loop/i })).toBeInTheDocument();
   });
 });
 
@@ -183,4 +209,47 @@ test('renders assistant responses with citations', async () => {
 
   expect(await screen.findByText(/Reset the tenant certificate/i)).toBeInTheDocument();
   expect(screen.getByText(/SSO redirect loop · 00123456/i)).toBeInTheDocument();
+});
+
+test('keeps page pictures hidden until the user clicks to reveal them', async () => {
+  global.fetch = createFetchMock([imageEntry], {
+    answer: 'Use the screenshot-heavy article.',
+    citations: [{ id: 'page-3', summary: 'Screenshot-heavy article', sf_case: '00130000' }],
+    matched_pages: [{ id: 'page-3', summary: 'Screenshot-heavy article', sf_case: '00130000' }],
+    refusal: false,
+  });
+
+  render(<App />);
+
+  expect(
+    await screen.findByRole('button', { name: /Open knowledge page Screenshot-heavy article/i })
+  ).toBeInTheDocument();
+
+  await userEvent.click(
+    screen.getByRole('button', { name: /Open knowledge page Screenshot-heavy article/i })
+  );
+
+  expect(window.open).toHaveBeenCalled();
+  expect(popupMock.document.write).toHaveBeenCalledWith(expect.stringContaining('Screenshot-heavy article'));
+  expect(popupMock.document.write).toHaveBeenCalledWith(expect.stringContaining('testimage'));
+});
+
+test('opens and closes the creation panel on demand', async () => {
+  global.fetch = createFetchMock([activeEntry], {
+    answer: 'Use the SSO redirect loop article. Sources: SSO redirect loop.',
+    citations: [{ id: 'page-1', summary: 'SSO redirect loop', sf_case: '00123456' }],
+    matched_pages: [{ id: 'page-1', summary: 'SSO redirect loop', sf_case: '00123456' }],
+    refusal: false,
+  });
+
+  render(<App />);
+
+  expect(await screen.findByRole('button', { name: /Add new page/i })).toBeInTheDocument();
+  expect(screen.queryByLabelText(/Summary/i)).not.toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: /Add new page/i }));
+  expect(screen.getByLabelText(/Summary/i)).toBeInTheDocument();
+
+  await userEvent.click(screen.getByRole('button', { name: /^Close$/i }));
+  expect(screen.queryByLabelText(/Summary/i)).not.toBeInTheDocument();
 });

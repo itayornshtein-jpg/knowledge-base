@@ -149,6 +149,28 @@
   padding: 28px;
 }
 
+.composer-closed {
+  display: grid;
+  gap: 20px;
+}
+
+.section-heading-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.composer-close {
+  flex-shrink: 0;
+}
+
+.composer-launch {
+  display: grid;
+  gap: 14px;
+  margin-top: 10px;
+}
+
 .section-heading h2,
 .assistant-header h2 {
   margin: 8px 0 10px;
@@ -223,6 +245,10 @@
   padding: 4px 2px 4px 0;
 }
 
+.related-search-input {
+  width: 100%;
+}
+
 .reference-option {
   display: flex;
   align-items: flex-start;
@@ -244,6 +270,46 @@
 
 .reference-option small {
   color: var(--navy-soft);
+}
+
+.image-preview-grid,
+.entry-image-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.image-preview-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.image-preview,
+.entry-image {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 14px;
+  border: 1px solid rgba(47, 109, 246, 0.12);
+  background: rgba(47, 109, 246, 0.06);
+}
+
+.image-remove-button,
+.picture-toggle {
+  justify-self: flex-start;
+}
+
+.picture-block {
+  margin-top: 20px;
+}
+
+.entry-image-link {
+  display: block;
+  text-decoration: none;
 }
 
 .helper-text {
@@ -378,7 +444,52 @@
 }
 
 .entry-card {
-  padding: 26px;
+  padding: 22px 24px;
+}
+
+.entry-list-item {
+  display: grid;
+  gap: 18px;
+}
+
+.entry-list-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.entry-open-button {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.entry-open-button:hover .entry-list-title {
+  color: var(--blue);
+}
+
+.entry-list-title {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--navy);
+  line-height: 1.1;
+  transition: color 0.2s ease;
+}
+
+.entry-list-meta {
+  color: var(--navy-soft);
+  line-height: 1.5;
+}
+
+.compact-entry-footer {
+  margin-top: 0;
+  padding-top: 16px;
 }
 
 .archived-card {
@@ -656,7 +767,9 @@
 
   .entry-topline,
   .entry-footer,
-  .assistant-header {
+  .assistant-header,
+  .section-heading-row,
+  .entry-list-row {
     flex-direction: column;
     align-items: flex-start;
   }

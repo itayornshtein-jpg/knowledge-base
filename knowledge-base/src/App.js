@@ -10,6 +10,7 @@ const emptyForm = {
   solution: '',
   summary: '',
   related_page_ids: [],
+  images: [],
   deleted_at: null,
 };
 const initialAssistantMessage = {
@@ -30,6 +31,7 @@ const normalizeEntry = (entry = {}) => ({
   related_page_ids: Array.isArray(entry.related_page_ids)
     ? [...new Set(entry.related_page_ids.filter(Boolean))]
     : [],
+  images: Array.isArray(entry.images) ? entry.images.filter(Boolean) : [],
   deleted_at: entry.deleted_at || null,
 });
 
@@ -40,6 +42,13 @@ const splitLines = (text) =>
     .filter(Boolean);
 
 const normalizeText = (value) => value.toLowerCase();
+const escapeHtml = (value) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_BASE}${path}`, options);
@@ -52,9 +61,114 @@ async function requestJson(path, options = {}) {
   return data;
 }
 
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+    reader.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function readImageFiles(fileList) {
+  return Promise.all(Array.from(fileList).map(readImageFile));
+}
+
+function buildDetailWindowHtml(entry, resolvedReferences, unresolvedCount) {
+  const issueLines = splitLines(entry.description);
+  const solutionLines = splitLines(entry.solution);
+  const relatedMarkup = resolvedReferences.length
+    ? resolvedReferences
+        .map(
+          (relatedEntry) =>
+            `<span class="detail-chip">${escapeHtml(relatedEntry.summary)} · ${escapeHtml(relatedEntry.sf_case)}</span>`
+        )
+        .join('')
+    : '<p class="detail-muted">No active related pages are linked to this article.</p>';
+
+  const imagesMarkup = entry.images.length
+    ? `<section class="detail-section"><h2>Pictures</h2><div class="detail-image-grid">${entry.images
+        .map(
+          (image, index) =>
+            `<a href="${escapeHtml(image)}" target="_blank" rel="noopener noreferrer" class="detail-image-link"><img src="${escapeHtml(image)}" alt="${escapeHtml(entry.summary)} screenshot ${index + 1}" class="detail-image" /></a>`
+        )
+        .join('')}</div></section>`
+    : '';
+
+  const jiraMarkup = entry.jira_link
+    ? `<a href="${escapeHtml(entry.jira_link)}" target="_blank" rel="noopener noreferrer" class="detail-link">Open JIRA</a>`
+    : '<span class="detail-muted">No engineering link attached yet.</span>';
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(entry.summary)}</title>
+  <style>
+    body { margin: 0; font-family: "Avenir Next", "Segoe UI", Arial, sans-serif; background: linear-gradient(180deg, #f7f9ff 0%, #ffffff 100%); color: #241b57; }
+    .detail-shell { max-width: 980px; margin: 0 auto; padding: 40px 24px 56px; }
+    .detail-card { background: rgba(255,255,255,0.92); border: 1px solid rgba(36,27,87,0.1); border-radius: 28px; padding: 32px; box-shadow: 0 24px 70px rgba(43,50,108,0.12); }
+    .detail-eyebrow { margin: 0 0 8px; color: #2f6df6; text-transform: uppercase; letter-spacing: 0.18em; font-size: 12px; font-weight: 700; }
+    h1 { margin: 0 0 16px; font-size: clamp(2rem, 4vw, 3.4rem); line-height: 0.98; }
+    .detail-meta, .detail-chip-row { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+    .detail-chip { display: inline-flex; align-items: center; padding: 9px 12px; border-radius: 999px; background: rgba(47,109,246,0.08); color: #2f6df6; font-weight: 700; font-size: 13px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .detail-section { margin-top: 22px; padding: 20px; border-radius: 22px; background: rgba(247,249,255,0.9); border: 1px solid rgba(36,27,87,0.08); }
+    .detail-grid .detail-section { margin-top: 0; }
+    h2 { margin: 0 0 14px; font-size: 1rem; }
+    p, li, .detail-muted, a { color: #4f4b70; line-height: 1.65; }
+    ul, ol { margin: 0; padding-left: 1.2rem; }
+    .detail-link { color: #2f6df6; font-weight: 700; text-decoration: none; }
+    .detail-link:hover { text-decoration: underline; }
+    .detail-image-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; }
+    .detail-image { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 16px; border: 1px solid rgba(47,109,246,0.12); }
+    .detail-note { margin-top: 12px; color: #d66b28; }
+    @media (max-width: 760px) { .detail-grid { grid-template-columns: 1fr; } .detail-card { padding: 22px; } }
+  </style>
+</head>
+<body>
+  <main class="detail-shell">
+    <article class="detail-card">
+      <p class="detail-eyebrow">Knowledge Page</p>
+      <h1>${escapeHtml(entry.summary)}</h1>
+      <div class="detail-meta">
+        <span class="detail-chip">SF Case ${escapeHtml(entry.sf_case)}</span>
+        <span class="detail-chip">${entry.deleted_at ? 'Archived' : 'Active'}</span>
+        <span class="detail-chip">${entry.related_page_ids.length} related</span>
+        <span class="detail-chip">${entry.images.length} pictures</span>
+      </div>
+      <div class="detail-grid">
+        <section class="detail-section">
+          <h2>Issue definition</h2>
+          ${issueLines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+        </section>
+        <section class="detail-section">
+          <h2>Resolution</h2>
+          ${solutionLines.length > 1 ? `<ol>${solutionLines.map((line) => `<li>${escapeHtml(line)}</li>`).join('')}</ol>` : solutionLines.map((line) => `<p>${escapeHtml(line)}</p>`).join('')}
+        </section>
+      </div>
+      <section class="detail-section">
+        <h2>Related pages</h2>
+        <div class="detail-chip-row">${relatedMarkup}</div>
+        ${unresolvedCount > 0 ? '<p class="detail-note">Referenced page unavailable.</p>' : ''}
+      </section>
+      ${imagesMarkup}
+      <section class="detail-section">
+        <h2>References</h2>
+        ${jiraMarkup}
+      </section>
+    </article>
+  </main>
+</body>
+</html>`;
+}
+
 function App() {
   const [entries, setEntries] = useState([]);
+  const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [relatedSearchQuery, setRelatedSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('active');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -112,6 +226,7 @@ function App() {
         entry.solution,
         entry.jira_link,
         relatedSummaries,
+        entry.images.length ? 'has pictures' : '',
       ].join(' ')
     );
   };
@@ -132,6 +247,9 @@ function App() {
     .reverse();
 
   const availableReferenceEntries = activeEntries.filter((entry) => entry.id !== formData.id);
+  const filteredReferenceEntries = availableReferenceEntries.filter((entry) =>
+    `${entry.summary} ${entry.sf_case}`.toLowerCase().includes(relatedSearchQuery.toLowerCase())
+  );
   const hasArchivedReferences = formData.related_page_ids.some(
     (relatedId) => !activeEntryMap[relatedId] && allEntryMap[relatedId]
   );
@@ -144,6 +262,13 @@ function App() {
 
   const resetForm = () => {
     setFormData(emptyForm);
+    setRelatedSearchQuery('');
+  };
+
+  const closeComposer = () => {
+    resetForm();
+    setIsComposerOpen(false);
+    setErrorMessage('');
   };
 
   const handleChange = (field, value) => {
@@ -166,8 +291,37 @@ function App() {
     });
   };
 
+  const handleImageUpload = async (event) => {
+    const { files } = event.target;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    try {
+      const images = await readImageFiles(files);
+      setFormData((current) => ({
+        ...current,
+        images: [...current.images, ...images.filter(Boolean)],
+      }));
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error.message || 'The selected image could not be added.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const removeImage = (imageIndex) => {
+    setFormData((current) => ({
+      ...current,
+      images: current.images.filter((_, index) => index !== imageIndex),
+    }));
+  };
+
   const handleEdit = (entry) => {
     setFormData(normalizeEntry(entry));
+    setRelatedSearchQuery('');
+    setIsComposerOpen(true);
     setErrorMessage('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -183,6 +337,7 @@ function App() {
       description: formData.description,
       solution: formData.solution,
       related_page_ids: formData.related_page_ids,
+      images: formData.images,
     };
 
     try {
@@ -202,6 +357,7 @@ function App() {
 
       await loadEntries();
       resetForm();
+      setIsComposerOpen(false);
       setErrorMessage('');
     } catch (error) {
       console.error('Error saving data:', error);
@@ -235,6 +391,25 @@ function App() {
     } catch (error) {
       setErrorMessage(error.message || 'The page could not be restored.');
     }
+  };
+
+  const openEntryWindow = (entry) => {
+    const resolvedReferences = entry.related_page_ids
+      .map((relatedId) => activeEntryMap[relatedId])
+      .filter(Boolean);
+    const unresolvedCount = entry.related_page_ids.filter(
+      (relatedId) => !activeEntryMap[relatedId]
+    ).length;
+    const entryWindow = window.open('', '_blank', 'noopener,noreferrer');
+
+    if (!entryWindow) {
+      setErrorMessage('The page window was blocked by the browser. Allow pop-ups for this app and try again.');
+      return;
+    }
+
+    entryWindow.document.write(buildDetailWindowHtml(entry, resolvedReferences, unresolvedCount));
+    entryWindow.document.close();
+    entryWindow.focus();
   };
 
   const handleAssistantSubmit = async (event) => {
@@ -319,16 +494,34 @@ function App() {
         </section>
 
         <div className="workspace">
-          <section className="composer card">
+          <section className={`composer card ${isComposerOpen ? 'composer-open' : 'composer-closed'}`}>
             <div className="section-heading">
               <p className="eyebrow">{formData.id ? 'Edit Page' : 'Create Page'}</p>
-              <h2>{formData.id ? 'Update a support article' : 'Add a defined support article'}</h2>
+              <div className="section-heading-row">
+                <h2>{formData.id ? 'Update a support article' : 'Add a defined support article'}</h2>
+              </div>
               <p>
                 Capture the issue, resolution, and related pages so the knowledge base can answer
                 faster and with better context.
               </p>
             </div>
 
+            {!isComposerOpen ? (
+              <div className="composer-launch">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => {
+                    resetForm();
+                    setIsComposerOpen(true);
+                    setErrorMessage('');
+                  }}
+                >
+                  Add new page
+                </button>
+                <p className="helper-text">Open the creation panel only when you need it, and keep the knowledge library in focus the rest of the time.</p>
+              </div>
+            ) : (
             <form onSubmit={handleSubmit} className="entry-form">
               <div className="input-group">
                 <label htmlFor="summary">Summary *</label>
@@ -392,11 +585,20 @@ function App() {
 
               <div className="input-group">
                 <label>Related pages</label>
+                <input
+                  type="text"
+                  className="related-search-input"
+                  placeholder="Search related pages by summary or SF case"
+                  value={relatedSearchQuery}
+                  onChange={(event) => setRelatedSearchQuery(event.target.value)}
+                />
                 <div className="reference-picker">
                   {availableReferenceEntries.length === 0 ? (
                     <p className="helper-text">Create another active page first to link knowledge pages.</p>
+                  ) : filteredReferenceEntries.length === 0 ? (
+                    <p className="helper-text">No related pages match this search.</p>
                   ) : (
-                    availableReferenceEntries.map((entry) => (
+                    filteredReferenceEntries.map((entry) => (
                       <label key={entry.id} className="reference-option">
                         <input
                           type="checkbox"
@@ -419,6 +621,34 @@ function App() {
                 ) : null}
               </div>
 
+              <div className="input-group">
+                <label htmlFor="page-images">Pictures</label>
+                <input
+                  id="page-images"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageUpload}
+                />
+                <p className="helper-text">Add screenshots or visual references. They stay hidden on page cards until clicked.</p>
+                {formData.images.length ? (
+                  <div className="image-preview-grid">
+                    {formData.images.map((image, index) => (
+                      <div key={`${formData.id || 'draft'}-image-${index}`} className="image-preview-card">
+                        <img src={image} alt={`Page upload ${index + 1}`} className="image-preview" />
+                        <button
+                          type="button"
+                          className="text-action danger-action image-remove-button"
+                          onClick={() => removeImage(index)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="form-actions">
                 <button type="submit" className="btn-primary" disabled={isSaving}>
                   {isSaving
@@ -428,13 +658,12 @@ function App() {
                       : 'Save knowledge page'}
                 </button>
 
-                {formData.id ? (
-                  <button type="button" className="btn-secondary" onClick={resetForm}>
-                    Cancel edit
-                  </button>
-                ) : null}
+                <button type="button" className="btn-secondary" onClick={closeComposer}>
+                  {formData.id ? 'Cancel edit' : 'Close'}
+                </button>
               </div>
             </form>
+            )}
           </section>
 
           <section className="library">
@@ -483,140 +712,83 @@ function App() {
                     <p>Try a broader search term or switch archive filters to reveal more pages.</p>
                   </div>
                 ) : (
-                  visibleEntries.map((item) => {
-                    const issueLines = splitLines(item.description);
-                    const solutionLines = splitLines(item.solution);
-                    const resolvedReferences = item.related_page_ids
-                      .map((relatedId) => activeEntryMap[relatedId])
-                      .filter(Boolean);
-                    const unresolvedCount = item.related_page_ids.filter(
-                      (relatedId) => !activeEntryMap[relatedId]
-                    ).length;
-
-                    return (
-                      <article
-                        key={item.id}
-                        id={`knowledge-${item.id}`}
-                        className={`entry-card card ${item.deleted_at ? 'archived-card' : ''}`}
-                      >
-                        <div className="entry-topline">
-                          <div>
-                            <p className="entry-kicker">Knowledge page</p>
-                            <h3>{item.summary}</h3>
-                          </div>
-
-                          <div className="entry-badges">
-                            <span className="badge case-badge">SF Case {item.sf_case}</span>
-                            <span className={`badge ${item.deleted_at ? 'archived-badge' : 'linked-badge'}`}>
-                              {item.deleted_at ? 'Archived' : 'Active'}
-                            </span>
-                            <span className="badge muted-badge">
-                              {item.related_page_ids.length} related
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="entry-grid">
-                          <section className="entry-block">
-                            <h4>Issue definition</h4>
-                            {issueLines.map((line, lineIndex) => (
-                              <p key={`${item.id}-issue-${lineIndex}`}>{line}</p>
-                            ))}
-                          </section>
-
-                          <section className="entry-block">
-                            <h4>Resolution</h4>
-                            {solutionLines.length > 1 ? (
-                              <ol className="solution-list">
-                                {solutionLines.map((line, lineIndex) => (
-                                  <li key={`${item.id}-solution-${lineIndex}`}>{line}</li>
-                                ))}
-                              </ol>
-                            ) : (
-                              solutionLines.map((line, lineIndex) => (
-                                <p key={`${item.id}-solution-single-${lineIndex}`}>{line}</p>
-                              ))
-                            )}
-                          </section>
-                        </div>
-
-                        <section className="related-pages-block">
-                          <div className="related-pages-heading">
-                            <h4>Related pages</h4>
-                            <span>{item.related_page_ids.length || 0} linked</span>
-                          </div>
-
-                          {resolvedReferences.length > 0 ? (
-                            <div className="related-pages-list">
-                              {resolvedReferences.map((relatedEntry) => (
-                                <a
-                                  key={relatedEntry.id}
-                                  href={`#knowledge-${relatedEntry.id}`}
-                                  className="related-chip"
-                                >
-                                  {relatedEntry.summary}
-                                </a>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="helper-text">No active related pages are linked to this article.</p>
-                          )}
-
-                          {unresolvedCount > 0 ? (
-                            <p className="helper-text warning-text">Referenced page unavailable.</p>
-                          ) : null}
-                        </section>
-
-                        <div className="entry-footer">
-                          <span className="entry-reference">
-                            {item.jira_link
-                              ? 'Linked engineering reference available.'
-                              : 'No engineering link attached yet.'}
+                  visibleEntries.map((item) => (
+                    <article
+                      key={item.id}
+                      id={`knowledge-${item.id}`}
+                      className={`entry-card card entry-list-item ${item.deleted_at ? 'archived-card' : ''}`}
+                    >
+                      <div className="entry-list-row">
+                        <button
+                          type="button"
+                          className="entry-open-button"
+                          aria-label={`Open knowledge page ${item.summary}`}
+                          onClick={() => openEntryWindow(item)}
+                        >
+                          <span className="entry-kicker">Knowledge page</span>
+                          <span className="entry-list-title">{item.summary}</span>
+                          <span className="entry-list-meta">
+                            SF Case {item.sf_case} · {item.related_page_ids.length} related · {item.images.length} pictures
                           </span>
+                        </button>
 
-                          <div className="entry-actions">
-                            {!item.deleted_at ? (
-                              <>
-                                <button
-                                  type="button"
-                                  className="text-action"
-                                  onClick={() => handleEdit(item)}
-                                >
-                                  Edit page
-                                </button>
-                                <button
-                                  type="button"
-                                  className="text-action danger-action"
-                                  onClick={() => handleArchive(item)}
-                                >
-                                  Delete page
-                                </button>
-                              </>
-                            ) : (
+                        <div className="entry-badges">
+                          <span className="badge case-badge">SF Case {item.sf_case}</span>
+                          <span className={`badge ${item.deleted_at ? 'archived-badge' : 'linked-badge'}`}>
+                            {item.deleted_at ? 'Archived' : 'Active'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="entry-footer compact-entry-footer">
+                        <span className="entry-reference">
+                          {item.jira_link
+                            ? 'Linked engineering reference available.'
+                            : 'No engineering link attached yet.'}
+                        </span>
+
+                        <div className="entry-actions">
+                          {!item.deleted_at ? (
+                            <>
                               <button
                                 type="button"
                                 className="text-action"
-                                onClick={() => handleRestore(item)}
+                                onClick={() => handleEdit(item)}
                               >
-                                Restore page
+                                Edit page
                               </button>
-                            )}
-
-                            {item.jira_link ? (
-                              <a
-                                href={item.jira_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="jira-link"
+                              <button
+                                type="button"
+                                className="text-action danger-action"
+                                onClick={() => handleArchive(item)}
                               >
-                                Open JIRA
-                              </a>
-                            ) : null}
-                          </div>
+                                Delete page
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              className="text-action"
+                              onClick={() => handleRestore(item)}
+                            >
+                              Restore page
+                            </button>
+                          )}
+
+                          {item.jira_link ? (
+                            <a
+                              href={item.jira_link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="jira-link"
+                            >
+                              Open JIRA
+                            </a>
+                          ) : null}
                         </div>
-                      </article>
-                    );
-                  })
+                      </div>
+                    </article>
+                  ))
                 )}
               </div>
 

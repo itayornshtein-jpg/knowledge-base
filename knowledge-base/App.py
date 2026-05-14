@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
@@ -18,6 +18,7 @@ CORS(app)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_DB_FILE = os.path.join(BASE_DIR, 'db.json')
 DEFAULT_MODEL = 'gpt-5.4-mini'
+ARCHIVE_RETENTION_DAYS = 7
 VALID_VIEWS = {'active', 'archived', 'all'}
 ENTRY_FIELDS = ['summary', 'sf_case', 'jira_link', 'description', 'solution']
 REQUIRED_FIELDS = ['sf_case', 'description', 'solution', 'summary']
@@ -30,8 +31,8 @@ def get_db_file():
 def ensure_db_file():
     db_file = get_db_file()
     if not os.path.exists(db_file):
-      with open(db_file, 'w', encoding='utf-8') as handle:
-          json.dump([], handle, indent=2)
+        with open(db_file, 'w', encoding='utf-8') as handle:
+            json.dump([], handle, indent=2)
 
 
 def coerce_text(value):
@@ -56,6 +57,20 @@ def normalize_related_ids(value):
     return normalized
 
 
+def normalize_images(value):
+    if not isinstance(value, list):
+        return []
+
+    normalized = []
+
+    for item in value:
+        item_text = coerce_text(item)
+        if item_text:
+            normalized.append(item_text)
+
+    return normalized
+
+
 def normalize_entry(entry=None):
     entry = entry or {}
 
@@ -67,8 +82,42 @@ def normalize_entry(entry=None):
         'description': coerce_text(entry.get('description')),
         'solution': coerce_text(entry.get('solution')),
         'related_page_ids': normalize_related_ids(entry.get('related_page_ids')),
+        'images': normalize_images(entry.get('images')),
         'deleted_at': coerce_text(entry.get('deleted_at')) or None,
     }
+
+
+def parse_deleted_at(value):
+    if not value:
+        return None
+
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def is_entry_expired(entry):
+    deleted_at = parse_deleted_at(entry.get('deleted_at'))
+    if deleted_at is None:
+        return False
+
+    return deleted_at <= datetime.now(timezone.utc) - timedelta(days=ARCHIVE_RETENTION_DAYS)
+
+
+def purge_expired_entries(entries):
+    expired_ids = {entry['id'] for entry in entries if is_entry_expired(entry)}
+    if not expired_ids:
+        return entries
+
+    retained_entries = [entry for entry in entries if entry['id'] not in expired_ids]
+
+    for entry in retained_entries:
+        entry['related_page_ids'] = [
+            related_id for related_id in entry['related_page_ids'] if related_id not in expired_ids
+        ]
+
+    return retained_entries
 
 
 def read_db():
@@ -81,6 +130,7 @@ def read_db():
         raw_data = []
 
     normalized_data = [normalize_entry(item) for item in raw_data if isinstance(item, dict)]
+    normalized_data = purge_expired_entries(normalized_data)
 
     if normalized_data != raw_data:
         write_db(normalized_data)
@@ -124,6 +174,7 @@ def validate_entry_payload(payload, entries, current_entry_id=None):
 
     normalized = {field: coerce_text(payload.get(field)) for field in ENTRY_FIELDS}
     normalized['related_page_ids'] = normalize_related_ids(payload.get('related_page_ids'))
+    normalized['images'] = normalize_images(payload.get('images'))
 
     for field in REQUIRED_FIELDS:
         if not normalized[field]:
@@ -131,6 +182,9 @@ def validate_entry_payload(payload, entries, current_entry_id=None):
 
     if 'related_page_ids' in payload and not isinstance(payload.get('related_page_ids'), list):
         return None, 'related_page_ids must be an array of page IDs.'
+
+    if 'images' in payload and not isinstance(payload.get('images'), list):
+        return None, 'images must be an array of image strings.'
 
     active_ids = {entry['id'] for entry in entries if not entry['deleted_at']}
     invalid_ids = [item for item in normalized['related_page_ids'] if item not in active_ids]
@@ -250,6 +304,7 @@ def build_page_context(entry, active_entry_map):
         'jira_link': entry['jira_link'],
         'description': entry['description'],
         'solution': entry['solution'],
+        'images': entry['images'],
         'related_pages': related_pages,
     }
 
@@ -469,4 +524,4 @@ def assistant_chat():
 
 if __name__ == '__main__':
     ensure_db_file()
-    app.run(debug=True, port=5001)
+    app.run(debug=True, use_reloader=False, port=5001)
