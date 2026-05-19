@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react';
+import { jiraTicketKey } from '../utils/jira';
 
 function highlight(text, query) {
   if (!query) return text;
@@ -26,6 +27,8 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore,
     entry.description.length > 120
       ? entry.description.slice(0, 120) + '…'
       : entry.description;
+
+  const jiraKey = jiraTicketKey(entry.jira_link);
 
   return (
     <article
@@ -57,6 +60,19 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore,
             </button>
           )}
           <span className="badge case-badge">SF {highlight(entry.sf_case, searchQuery)}</span>
+          {jiraKey && (
+            <a
+              href={entry.jira_link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="badge jira-badge"
+              onClick={(e) => e.stopPropagation()}
+              title={`Open ${jiraKey} in JIRA`}
+            >
+              <span className="jira-badge-icon" aria-hidden="true">⌁</span>
+              {jiraKey}
+            </a>
+          )}
           <span className={`badge ${entry.deleted_at ? 'archived-badge' : 'linked-badge'}`}>
             {entry.deleted_at ? 'Archived' : 'Active'}
           </span>
@@ -76,8 +92,8 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore,
 
       <div className="entry-footer compact-entry-footer">
         <span className="entry-reference">
-          {entry.jira_link
-            ? 'Engineering reference available.'
+          {jiraKey
+            ? `Linked to ${jiraKey}`
             : 'No engineering link attached.'}
         </span>
 
@@ -87,7 +103,6 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore,
               <button type="button" className="text-action" onClick={() => onEdit(entry)}>
                 Edit
               </button>
-
               <button
                 type="button"
                 className="text-action danger-action"
@@ -104,17 +119,6 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore,
             >
               Restore
             </button>
-          )}
-
-          {entry.jira_link && (
-            <a
-              href={entry.jira_link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="jira-link"
-            >
-              Open JIRA
-            </a>
           )}
         </div>
       </div>

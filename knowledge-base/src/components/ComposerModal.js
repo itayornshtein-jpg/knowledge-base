@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { normalizeEntry } from '../hooks/useEntries';
+import { normalizeEntry, requestJson } from '../hooks/useEntries';
+import { useToast } from '../hooks/useToast';
 // categories prop is an array of { id, name, color } passed from App
 
 const emptyForm = {
@@ -30,6 +31,14 @@ function ComposerModal({ entry, entries, categories = [], onSave, onClose }) {
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [relatedSearchQuery, setRelatedSearchQuery] = useState('');
+  const [isFetchingSF, setIsFetchingSF] = useState(false);
+  const { show: showToast } = useToast();
+  const summaryRef = useRef(null);
+
+  // Autofocus the first field when the modal opens
+  useEffect(() => {
+    summaryRef.current?.focus();
+  }, []);
 
   const activeEntries = entries.filter((e) => !e.deleted_at);
   const availableEntries = activeEntries.filter((e) => e.id !== formData.id);
@@ -100,6 +109,82 @@ function ComposerModal({ entry, entries, categories = [], onSave, onClose }) {
     }
   };
 
+  // Cmd/Ctrl+Enter submits the form from any focused field
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        const form = e.target?.closest?.('form');
+        if (form && typeof form.requestSubmit === 'function') {
+          form.requestSubmit();
+        }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  const handleFetchFromSF = useCallback(async () => {
+    const caseNumber = (formData.sf_case || '').trim();
+    if (!caseNumber) {
+      setErrorMessage('Enter a Salesforce case number first.');
+      return;
+    }
+    setIsFetchingSF(true);
+    setErrorMessage('');
+    try {
+      const data = await requestJson(
+        `/api/integrations/salesforce/case/${encodeURIComponent(caseNumber)}`
+      );
+      const incomingResolution = (data?.resolution || '').trim();
+      const incomingDescription = (data?.description || '').trim();
+      const subject = (data?.subject || '').trim();
+
+      if (!incomingResolution && !incomingDescription) {
+        showToast({
+          type: 'info',
+          message: `SF case ${data?.case_number || caseNumber} has no resolution comments yet.`,
+        });
+        return;
+      }
+
+      setFormData((prev) => {
+        const next = { ...prev };
+        if (incomingResolution) {
+          const existing = (prev.solution || '').trim();
+          next.solution = existing
+            ? `${existing}\n\n--- From SF ${data.case_number} ---\n${incomingResolution}`
+            : incomingResolution;
+        }
+        // Only fill description and summary when they're empty — never overwrite the user's text
+        if (!prev.description?.trim() && incomingDescription) {
+          next.description = incomingDescription;
+        }
+        if (!prev.summary?.trim() && subject) {
+          next.summary = subject;
+        }
+        return next;
+      });
+
+      showToast({
+        type: 'success',
+        message: `Pulled resolution from SF case ${data?.case_number || caseNumber}.`,
+      });
+    } catch (err) {
+      const msg = err.message || 'Could not fetch from Salesforce.';
+      // 503 from backend means Salesforce isn't configured — surface a clear hint
+      showToast({
+        type: 'error',
+        message: msg.includes('not configured')
+          ? 'Salesforce is not configured on the backend. See backend/.env (SF_* variables).'
+          : msg,
+        duration: 7000,
+      });
+    } finally {
+      setIsFetchingSF(false);
+    }
+  }, [formData.sf_case, showToast]);
+
   const isEdit = Boolean(formData.id);
 
   return ReactDOM.createPortal(
@@ -137,6 +222,7 @@ function ComposerModal({ entry, entries, categories = [], onSave, onClose }) {
             <label htmlFor="modal-summary">Summary *</label>
             <input
               id="modal-summary"
+              ref={summaryRef}
               placeholder="Login flow fails after SSO redirect"
               required
               value={formData.summary}
@@ -147,13 +233,28 @@ function ComposerModal({ entry, entries, categories = [], onSave, onClose }) {
           <div className="two-column-grid">
             <div className="input-group">
               <label htmlFor="modal-sf-case">Salesforce Case *</label>
-              <input
-                id="modal-sf-case"
-                placeholder="00123456"
-                required
-                value={formData.sf_case}
-                onChange={(e) => handleChange('sf_case', e.target.value)}
-              />
+              <div className="input-with-action">
+                <input
+                  id="modal-sf-case"
+                  placeholder="00123456"
+                  required
+                  value={formData.sf_case}
+                  onChange={(e) => handleChange('sf_case', e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="text-action sf-fetch-btn"
+                  onClick={handleFetchFromSF}
+                  disabled={isFetchingSF || !formData.sf_case?.trim()}
+                  title="Pull Subject + Resolution from Salesforce by case number"
+                >
+                  {isFetchingSF ? 'Fetching…' : 'Pull from SF'}
+                </button>
+              </div>
+              <p className="helper-text">
+                Press <strong>Pull from SF</strong> to fill the resolution from the linked case's
+                comments.
+              </p>
             </div>
             <div className="input-group">
               <label htmlFor="modal-jira-link">JIRA Link</label>
@@ -172,19 +273,30 @@ function ComposerModal({ entry, entries, categories = [], onSave, onClose }) {
               id="modal-description"
               placeholder="What the customer saw, when it happened, and how it impacted them."
               required
-              rows="5"
+              rows="6"
               value={formData.description}
               onChange={(e) => handleChange('description', e.target.value)}
             />
           </div>
 
           <div className="input-group">
-            <label htmlFor="modal-solution">Resolution steps *</label>
+            <div className="input-group-header">
+              <label htmlFor="modal-solution">Resolution steps *</label>
+              <button
+                type="button"
+                className="text-action sf-fetch-btn-inline"
+                onClick={handleFetchFromSF}
+                disabled={isFetchingSF || !formData.sf_case?.trim()}
+                title="Pull Resolution from the linked SF case"
+              >
+                {isFetchingSF ? 'Fetching…' : '↓ Pull from SF case'}
+              </button>
+            </div>
             <textarea
               id="modal-solution"
               placeholder={`1. Confirm the tenant SSO certificate.\n2. Re-sync the IdP metadata.\n3. Re-run the login validation.`}
               required
-              rows="6"
+              rows="10"
               value={formData.solution}
               onChange={(e) => handleChange('solution', e.target.value)}
             />
@@ -291,9 +403,10 @@ function ComposerModal({ entry, entries, categories = [], onSave, onClose }) {
           <div className="form-actions">
             <button type="submit" className="btn-primary" disabled={isSaving}>
               {isSaving ? 'Saving...' : isEdit ? 'Save page changes' : 'Save knowledge page'}
+              <span className="kbd-hint">⌘↵</span>
             </button>
             <button type="button" className="btn-secondary" onClick={onClose}>
-              Cancel
+              Cancel <span className="kbd-hint">Esc</span>
             </button>
           </div>
         </form>

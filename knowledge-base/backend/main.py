@@ -7,7 +7,7 @@ import os
 
 from backend.config import get_settings
 from backend.database import create_tables
-from backend.routers import knowledge, categories, assistant
+from backend.routers import knowledge, categories, assistant, integrations
 
 settings = get_settings()
 
@@ -37,9 +37,10 @@ app.add_middleware(
 )
 
 # ── API routes ────────────────────────────────────────────────────────────────
-app.include_router(knowledge.router,   prefix="/api/knowledge")
-app.include_router(categories.router,  prefix="/api/categories")
-app.include_router(assistant.router,   prefix="/api/assistant")
+app.include_router(knowledge.router,    prefix="/api/knowledge")
+app.include_router(categories.router,   prefix="/api/categories")
+app.include_router(assistant.router,    prefix="/api/assistant")
+app.include_router(integrations.router, prefix="/api/integrations")
 
 
 @app.get("/api/health")

@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { requestJson, normalizeEntry } from '../hooks/useEntries';
+import { jiraTicketKey } from '../utils/jira';
 
 function splitLines(text) {
   return text
@@ -50,7 +51,6 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
 
   const entry = localEntry || fetched;
 
-  // Best-effort map for resolving related-page chips (limited to entries on the current page).
   const activeEntryMap = useMemo(
     () =>
       entries.reduce((m, e) => {
@@ -60,13 +60,28 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
     [entries]
   );
 
+  const startEdit = useCallback(() => {
+    if (entry && !entry.deleted_at) onEdit(entry);
+  }, [entry, onEdit]);
+
+  // Keyboard shortcuts: Escape closes, E starts editing (when not focused in an input)
   useEffect(() => {
     const handleKey = (e) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      const tag = (e.target?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        startEdit();
+      }
     };
     document.addEventListener('keydown', handleKey);
     return () => document.removeEventListener('keydown', handleKey);
-  }, [onClose]);
+  }, [onClose, startEdit]);
 
   if (isFetching && !entry) {
     return (
@@ -101,6 +116,7 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
   const unresolvedCount = entry.related_page_ids.filter((id) => !activeEntryMap[id]).length;
   const issueLines = splitLines(entry.description);
   const solutionLines = splitLines(entry.solution);
+  const jiraKey = jiraTicketKey(entry.jira_link);
 
   return (
     <article className="detail-panel card">
@@ -109,8 +125,14 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
           ← Back to list
         </button>
         {!entry.deleted_at && (
-          <button type="button" className="text-action" onClick={() => onEdit(entry)}>
-            Edit page
+          <button
+            type="button"
+            className="btn-primary detail-edit-btn"
+            onClick={startEdit}
+            title="Edit this page (press E)"
+            aria-keyshortcuts="e"
+          >
+            ✎ Edit page <span className="kbd-hint">E</span>
           </button>
         )}
       </div>
@@ -120,19 +142,42 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
 
       <div className="detail-meta">
         <span className="badge case-badge">SF Case {entry.sf_case}</span>
+        {jiraKey ? (
+          <a
+            href={entry.jira_link}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="badge jira-badge"
+            title={`Open ${jiraKey} in JIRA`}
+          >
+            <span className="jira-badge-icon" aria-hidden="true">⌁</span>
+            JIRA · {jiraKey}
+          </a>
+        ) : (
+          <span className="badge muted-badge" title="No JIRA ticket linked">
+            No JIRA ticket
+          </span>
+        )}
         <span className={`badge ${entry.deleted_at ? 'archived-badge' : 'linked-badge'}`}>
           {entry.deleted_at ? 'Archived' : 'Active'}
         </span>
         <span className="badge muted-badge">{entry.related_page_ids.length} related</span>
         <span className="badge muted-badge">{entry.images.length} pictures</span>
+        {entry.view_count > 0 && (
+          <span className="badge muted-badge" title="View count">
+            {entry.view_count} 👁
+          </span>
+        )}
       </div>
 
       <div className="detail-grid">
         <section className="entry-block">
           <h4>Issue definition</h4>
-          {issueLines.map((line, i) => (
-            <p key={i}>{line}</p>
-          ))}
+          {issueLines.length > 0 ? (
+            issueLines.map((line, i) => <p key={i}>{line}</p>)
+          ) : (
+            <p className="helper-text">No issue definition recorded.</p>
+          )}
         </section>
 
         <section className="entry-block">
@@ -143,8 +188,10 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
                 <li key={i}>{line}</li>
               ))}
             </ol>
-          ) : (
+          ) : solutionLines.length === 1 ? (
             solutionLines.map((line, i) => <p key={i}>{line}</p>)
+          ) : (
+            <p className="helper-text">No resolution recorded.</p>
           )}
         </section>
       </div>
@@ -200,22 +247,6 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
           </div>
         </section>
       )}
-
-      <section className="entry-block">
-        <h4>References</h4>
-        {entry.jira_link ? (
-          <a
-            href={entry.jira_link}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="jira-link"
-          >
-            Open JIRA
-          </a>
-        ) : (
-          <span className="helper-text">No engineering link attached yet.</span>
-        )}
-      </section>
     </article>
   );
 }
