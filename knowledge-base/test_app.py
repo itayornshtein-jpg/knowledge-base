@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import tempfile
@@ -66,6 +67,7 @@ class KnowledgeBaseApiTests(unittest.TestCase):
 
         self.assertTrue(records[0]['id'])
         self.assertEqual(records[0]['related_page_ids'], [])
+        self.assertEqual(records[0]['images'], [])
         self.assertIsNone(records[0]['deleted_at'])
         self.assertTrue(self.read_db()[0]['id'])
 
@@ -86,6 +88,25 @@ class KnowledgeBaseApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertIn('related pages', response.get_json()['error'].lower())
+
+    def test_create_accepts_images(self):
+        self.write_db([])
+
+        response = self.client.post(
+            '/api/knowledge',
+            json={
+                'summary': 'New entry',
+                'sf_case': '00120010',
+                'jira_link': '',
+                'description': 'A new issue.',
+                'solution': 'A new fix.',
+                'related_page_ids': [],
+                'images': ['data:image/png;base64,abc123'],
+            },
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.get_json()['images'], ['data:image/png;base64,abc123'])
 
     def test_update_rejects_self_reference_and_unknown_ids(self):
         self.write_db(
@@ -159,6 +180,66 @@ class KnowledgeBaseApiTests(unittest.TestCase):
         self.client.post('/api/knowledge/page-1/restore')
         restored_response = self.client.get('/api/knowledge?view=active')
         self.assertEqual(len(restored_response.get_json()), 1)
+
+    def test_expired_archived_pages_are_purged_after_a_week(self):
+        expired_deleted_at = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+
+        self.write_db(
+            [
+                {
+                    'id': 'page-1',
+                    'summary': 'Expired archive',
+                    'sf_case': '00100002',
+                    'jira_link': '',
+                    'description': 'Old archived issue',
+                    'solution': 'Old archived fix',
+                    'related_page_ids': [],
+                    'deleted_at': expired_deleted_at,
+                },
+                {
+                    'id': 'page-2',
+                    'summary': 'Still active',
+                    'sf_case': '00100003',
+                    'jira_link': '',
+                    'description': 'Active issue',
+                    'solution': 'Active fix',
+                    'related_page_ids': ['page-1'],
+                    'deleted_at': None,
+                }
+            ]
+        )
+
+        response = self.client.get('/api/knowledge?view=all')
+        data = response.get_json()
+
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['id'], 'page-2')
+        self.assertEqual(data[0]['related_page_ids'], [])
+        self.assertEqual(len(self.read_db()), 1)
+
+    def test_recent_archived_pages_are_not_purged(self):
+        recent_deleted_at = (datetime.now(timezone.utc) - timedelta(days=6)).isoformat()
+
+        self.write_db(
+            [
+                {
+                    'id': 'page-1',
+                    'summary': 'Recent archive',
+                    'sf_case': '00100004',
+                    'jira_link': '',
+                    'description': 'Recent archived issue',
+                    'solution': 'Recent archived fix',
+                    'related_page_ids': [],
+                    'deleted_at': recent_deleted_at,
+                }
+            ]
+        )
+
+        response = self.client.get('/api/knowledge?view=archived')
+        data = response.get_json()
+
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['id'], 'page-1')
 
     def test_assistant_returns_refusal_when_no_page_matches(self):
         self.write_db(

@@ -1,6 +1,8 @@
 :root {
   color-scheme: light;
   --page-bg: #f7f9ff;
+  --sidebar-width: 220px;
+  --header-height: 64px;
   --navy: #241b57;
   --navy-soft: #4f4b70;
   --blue: #2f6df6;
