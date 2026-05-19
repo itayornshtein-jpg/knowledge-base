@@ -6,7 +6,11 @@ Priority order for LLM:
   2. OpenAI             — if OPENAI_API_KEY is set  (keeps compatibility with existing app)
   3. Fallback           — keyword search only, no LLM
 """
+import json
+from typing import Iterator
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import or_, func
 from sqlalchemy.orm import Session
 
@@ -135,3 +139,133 @@ def ask_assistant(payload: AssistantRequest, db: Session = Depends(get_db)):
         answer = "Related articles (no AI key configured):\n" + "\n".join(lines)
 
     return AssistantResponse(answer=answer, sources=source_ids)
+
+
+# ── Streaming variants ────────────────────────────────────────────────────────
+
+def _stream_claude(question: str, context: str) -> Iterator[str]:
+    import anthropic
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    with client.messages.stream(
+        model="claude-opus-4-6",
+        max_tokens=1024,
+        system=(
+            "You are a helpful support engineer assistant. "
+            "Answer the question using ONLY the knowledge base articles provided. "
+            "If the answer isn't in the articles, say so clearly. "
+            "Be concise and practical. Reference the article ID when relevant."
+        ),
+        messages=[
+            {
+                "role": "user",
+                "content": f"Knowledge base articles:\n{context}\n\nQuestion: {question}",
+            }
+        ],
+    ) as stream:
+        for text in stream.text_stream:
+            if text:
+                yield text
+
+
+def _stream_openai(question: str, context: str) -> Iterator[str]:
+    from openai import OpenAI
+    client = OpenAI(api_key=settings.openai_api_key)
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a helpful support engineer assistant. "
+                    "Answer using ONLY the knowledge base articles provided. "
+                    "If the answer isn't there, say so clearly."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Knowledge base articles:\n{context}\n\nQuestion: {question}",
+            },
+        ],
+        max_tokens=1024,
+        stream=True,
+    )
+    for chunk in response:
+        try:
+            delta = chunk.choices[0].delta
+            if delta and delta.content:
+                yield delta.content
+        except (IndexError, AttributeError):
+            continue
+
+
+def _sse(data: str, event: str | None = None) -> bytes:
+    """Format a single Server-Sent Events frame."""
+    out = ""
+    if event:
+        out += f"event: {event}\n"
+    # SSE requires every newline in data to be its own `data:` line
+    for line in data.split("\n"):
+        out += f"data: {line}\n"
+    out += "\n"
+    return out.encode("utf-8")
+
+
+@router.post("/stream")
+def ask_assistant_stream(payload: AssistantRequest, db: Session = Depends(get_db)):
+    """
+    Server-Sent Events endpoint. Streams text deltas as `data: <chunk>` frames,
+    then emits a final `event: sources\ndata: {ids:[...]}` frame and `event: done`.
+
+    Falls back to the non-streaming flow when no LLM key is configured —
+    a single `data: <answer>` frame followed by `sources` + `done`.
+    """
+    articles = _find_relevant_articles(db, payload.question)
+    context = _build_context(articles)
+    source_ids = [a.id for a in articles]
+
+    def emit() -> Iterator[bytes]:
+        try:
+            if settings.anthropic_api_key:
+                try:
+                    for chunk in _stream_claude(payload.question, context):
+                        yield _sse(chunk)
+                    yield _sse(json.dumps({"ids": source_ids}), event="sources")
+                    yield _sse("", event="done")
+                    return
+                except Exception as e:
+                    if not settings.openai_api_key:
+                        yield _sse(f"Assistant error: {e}", event="error")
+                        return
+
+            if settings.openai_api_key:
+                try:
+                    for chunk in _stream_openai(payload.question, context):
+                        yield _sse(chunk)
+                    yield _sse(json.dumps({"ids": source_ids}), event="sources")
+                    yield _sse("", event="done")
+                    return
+                except Exception as e:
+                    yield _sse(f"Assistant error: {e}", event="error")
+                    return
+
+            # No LLM key — emit the keyword-search fallback as a single frame
+            if not articles:
+                answer = "No relevant articles found for your question. Try different keywords."
+            else:
+                lines = [f"• [{a.sf_case}] {a.summary}" for a in articles]
+                answer = "Related articles (no AI key configured):\n" + "\n".join(lines)
+            yield _sse(answer)
+            yield _sse(json.dumps({"ids": source_ids}), event="sources")
+            yield _sse("", event="done")
+        except Exception as e:  # noqa: BLE001
+            yield _sse(f"Unexpected error: {e}", event="error")
+
+    return StreamingResponse(
+        emit(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",  # disable nginx buffering if present
+            "Connection": "keep-alive",
+        },
+    )

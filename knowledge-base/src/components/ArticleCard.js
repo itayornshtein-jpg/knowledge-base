@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback } from 'react';
 
 function highlight(text, query) {
   if (!query) return text;
@@ -9,13 +9,18 @@ function highlight(text, query) {
   );
 }
 
-function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore }) {
-  const [confirmArchive, setConfirmArchive] = useState(false);
-
+function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore, onToggleStar }) {
   const handleArchive = useCallback(() => {
-    onArchive(entry.id);
-    setConfirmArchive(false);
-  }, [onArchive, entry.id]);
+    onArchive(entry.id, entry.summary);
+  }, [onArchive, entry.id, entry.summary]);
+
+  const handleStar = useCallback(
+    (e) => {
+      e.stopPropagation();
+      if (onToggleStar) onToggleStar(entry.id);
+    },
+    [onToggleStar, entry.id]
+  );
 
   const snippet =
     entry.description.length > 120
@@ -39,6 +44,18 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore 
         </button>
 
         <div className="entry-badges">
+          {onToggleStar && (
+            <button
+              type="button"
+              className={`star-toggle${entry.is_starred ? ' star-toggle-on' : ''}`}
+              onClick={handleStar}
+              aria-label={entry.is_starred ? 'Unstar this page' : 'Star this page'}
+              aria-pressed={Boolean(entry.is_starred)}
+              title={entry.is_starred ? 'Starred' : 'Star this page'}
+            >
+              {entry.is_starred ? '★' : '☆'}
+            </button>
+          )}
           <span className="badge case-badge">SF {highlight(entry.sf_case, searchQuery)}</span>
           <span className={`badge ${entry.deleted_at ? 'archived-badge' : 'linked-badge'}`}>
             {entry.deleted_at ? 'Archived' : 'Active'}
@@ -48,6 +65,11 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore 
           )}
           {entry.images.length > 0 && (
             <span className="badge muted-badge">{entry.images.length} pics</span>
+          )}
+          {entry.view_count > 0 && (
+            <span className="badge muted-badge" title="View count">
+              {entry.view_count} 👁
+            </span>
           )}
         </div>
       </div>
@@ -66,33 +88,13 @@ function ArticleCard({ entry, searchQuery, onView, onEdit, onArchive, onRestore 
                 Edit
               </button>
 
-              {confirmArchive ? (
-                <>
-                  <span className="confirm-inline">Archive this page?</span>
-                  <button
-                    type="button"
-                    className="text-action danger-action"
-                    onClick={handleArchive}
-                  >
-                    Archive
-                  </button>
-                  <button
-                    type="button"
-                    className="text-action"
-                    onClick={() => setConfirmArchive(false)}
-                  >
-                    Cancel
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="text-action danger-action"
-                  onClick={() => setConfirmArchive(true)}
-                >
-                  Archive
-                </button>
-              )}
+              <button
+                type="button"
+                className="text-action danger-action"
+                onClick={handleArchive}
+              >
+                Archive
+              </button>
             </>
           ) : (
             <button

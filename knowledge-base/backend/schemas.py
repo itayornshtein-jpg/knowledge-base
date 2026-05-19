@@ -87,16 +87,19 @@ class ArticleOut(ArticleBase):
     created_at: datetime
     updated_at: datetime
     category: Optional[CategoryMini] = None
+    is_starred: bool = False
+    view_count: int = 0
 
     model_config = {"from_attributes": True}
 
 
 # ── Search / Stats ────────────────────────────────────────────────────────────
 
-class SearchResult(BaseModel):
-    articles: list[ArticleOut]
+class PagedArticles(BaseModel):
+    items: list[ArticleOut]
     total: int
-    query: str
+    limit: int
+    offset: int
 
 
 class Stats(BaseModel):

@@ -33,6 +33,7 @@ from urllib.error import HTTPError, URLError
 API_BASE = os.environ.get("KB_API_BASE", "http://localhost:8000")
 TOKEN = os.environ.get("KB_API_TOKEN", "")
 EDITOR = os.environ.get("EDITOR", "nano")
+DEFAULT_PAGE_SIZE = 50
 
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
@@ -161,13 +162,19 @@ def _open_in_editor(initial: dict) -> dict | None:
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 def cmd_list(args):
-    rows = _request("GET", "/api/knowledge", params={
+    response = _request("GET", "/api/knowledge", params={
         "view": args.view,
         "search": args.search,
         "category_id": args.category,
+        "limit": args.limit,
+        "offset": args.offset,
+        "sort": args.sort,
     })
-    _print_table(rows or [])
-    print(DIM(f"\n{len(rows or [])} page(s) · {API_BASE}"))
+    rows = (response or {}).get("items", []) if isinstance(response, dict) else (response or [])
+    total = (response or {}).get("total", len(rows)) if isinstance(response, dict) else len(rows)
+    _print_table(rows)
+    end = min(args.offset + args.limit, total)
+    print(DIM(f"\nshowing {args.offset + 1}-{end} of {total} · {API_BASE}"))
 
 
 def cmd_show(args):
@@ -247,6 +254,10 @@ def main(argv: list[str] | None = None):
     p_list.add_argument("--view", choices=["active", "archived", "all"], default="active")
     p_list.add_argument("--search", help="Search summary/case/description/solution")
     p_list.add_argument("--category", help="Filter by category UUID")
+    p_list.add_argument("--sort", choices=["newest", "oldest", "references"], default="newest")
+    p_list.add_argument("--limit", type=int, default=DEFAULT_PAGE_SIZE,
+                        help=f"Max rows per page (default {DEFAULT_PAGE_SIZE})")
+    p_list.add_argument("--offset", type=int, default=0, help="Skip first N rows")
     p_list.set_defaults(func=cmd_list)
 
     p_show = sub.add_parser("show", aliases=["cat"], help="Show one page")

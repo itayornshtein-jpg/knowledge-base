@@ -3,6 +3,7 @@ import './App.css';
 
 import { useEntries } from './hooks/useEntries';
 import { useCategories } from './hooks/useCategories';
+import { useDebounce } from './hooks/useDebounce';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
 import ArticleList from './components/ArticleList';
@@ -10,18 +11,56 @@ import ArticleDetail from './components/ArticleDetail';
 import AssistantPanel from './components/AssistantPanel';
 import ComposerModal from './components/ComposerModal';
 import CategoryModal from './components/CategoryModal';
+import ToastContainer from './components/Toast';
+
+const PAGE_SIZE = 20;
 
 function App() {
-  const { entries, isLoading, errorMessage, saveEntry, archiveEntry, restoreEntry } = useEntries();
   const { categories, createCategory, deleteCategory } = useCategories();
 
   const [activeFilter, setActiveFilter] = useState('active');
   const [activeCategoryId, setActiveCategoryId] = useState(null);
+  const [starredOnly, setStarredOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState('newest');
+  const [page, setPage] = useState(1);
+
   const [selectedEntryId, setSelectedEntryId] = useState(null);
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
+
+  const debouncedSearch = useDebounce(searchQuery, 300);
+
+  // Reset to page 1 whenever a filter changes
+  useEffect(() => {
+    setPage(1);
+  }, [activeFilter, activeCategoryId, starredOnly, debouncedSearch, sortOrder]);
+
+  const queryParams = useMemo(
+    () => ({
+      view: activeFilter,
+      search: debouncedSearch,
+      categoryId: activeCategoryId,
+      starred: starredOnly ? true : undefined,
+      sort: sortOrder,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }),
+    [activeFilter, debouncedSearch, activeCategoryId, starredOnly, sortOrder, page]
+  );
+
+  const {
+    entries,
+    total,
+    stats,
+    isLoading,
+    errorMessage,
+    saveEntry,
+    archiveEntry,
+    restoreEntry,
+    toggleStar,
+  } = useEntries(queryParams);
 
   // Hash-based navigation so articles are linkable
   useEffect(() => {
@@ -33,38 +72,6 @@ function App() {
     sync();
     return () => window.removeEventListener('popstate', sync);
   }, []);
-
-  const activeCount = useMemo(() => entries.filter((e) => !e.deleted_at).length, [entries]);
-  const archivedCount = useMemo(() => entries.filter((e) => e.deleted_at).length, [entries]);
-
-  const visibleCount = useMemo(() => {
-    const q = searchQuery.toLowerCase();
-    const activeEntryMap = entries.reduce((m, e) => {
-      if (!e.deleted_at) m[e.id] = e;
-      return m;
-    }, {});
-
-    return entries.filter((e) => {
-      const matchesFilter =
-        activeFilter === 'active'
-          ? !e.deleted_at
-          : activeFilter === 'archived'
-          ? Boolean(e.deleted_at)
-          : true;
-
-      if (!matchesFilter) return false;
-      if (activeCategoryId && e.category_id !== activeCategoryId) return false;
-      if (!q) return true;
-
-      const relatedSummaries = e.related_page_ids
-        .map((id) => activeEntryMap[id]?.summary || '')
-        .join(' ');
-      const text = [e.summary, e.sf_case, e.description, e.solution, e.jira_link, relatedSummaries]
-        .join(' ')
-        .toLowerCase();
-      return text.includes(q);
-    }).length;
-  }, [entries, activeFilter, activeCategoryId, searchQuery]);
 
   const handleNewPage = useCallback(() => {
     setEditingEntry(null);
@@ -97,9 +104,9 @@ function App() {
       <div className="background-orb background-orb-right" />
 
       <Header
-        activeCount={activeCount}
-        archivedCount={archivedCount}
-        visibleCount={visibleCount}
+        activeCount={stats.active}
+        archivedCount={stats.archived}
+        visibleCount={total}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onNewPage={handleNewPage}
@@ -112,6 +119,8 @@ function App() {
           categories={categories}
           activeCategoryId={activeCategoryId}
           onCategoryChange={setActiveCategoryId}
+          starredOnly={starredOnly}
+          onStarredToggle={() => setStarredOnly((v) => !v)}
           onManageCategories={() => setIsCategoryModalOpen(true)}
         />
 
@@ -126,15 +135,20 @@ function App() {
           ) : (
             <ArticleList
               entries={entries}
+              total={total}
+              page={page}
+              pageSize={PAGE_SIZE}
+              sortOrder={sortOrder}
+              onSortChange={setSortOrder}
+              onPageChange={setPage}
               isLoading={isLoading}
               errorMessage={errorMessage}
-              activeFilter={activeFilter}
-              activeCategoryId={activeCategoryId}
-              searchQuery={searchQuery}
+              searchQuery={debouncedSearch}
               onViewDetail={handleViewDetail}
               onEdit={handleEdit}
               onArchive={archiveEntry}
               onRestore={restoreEntry}
+              onToggleStar={toggleStar}
             />
           )}
         </main>
@@ -162,6 +176,8 @@ function App() {
           onClose={() => setIsCategoryModalOpen(false)}
         />
       )}
+
+      <ToastContainer />
     </div>
   );
 }

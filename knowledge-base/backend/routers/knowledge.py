@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session
 from backend.database import get_db
 from backend.deps import get_current_user
 from backend.models import Article
-from backend.schemas import ArticleCreate, ArticleOut, ArticleUpdate, Stats
+from backend.schemas import (
+    ArticleCreate,
+    ArticleOut,
+    ArticleUpdate,
+    PagedArticles,
+    Stats,
+)
 
 router = APIRouter(tags=["knowledge"])
 
@@ -33,11 +39,15 @@ def _article_or_404(db: Session, article_id: str) -> Article:
 
 # ── GET /api/knowledge ────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[ArticleOut])
+@router.get("", response_model=PagedArticles)
 def list_articles(
     view: Literal["active", "archived", "all"] = Query("active"),
     search: Optional[str] = Query(None),
     category_id: Optional[UUID] = Query(None),
+    starred: Optional[bool] = Query(None),
+    sort: Literal["newest", "oldest", "references", "popularity"] = Query("newest"),
+    limit: int = Query(20, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     q = db.query(Article)
@@ -53,7 +63,13 @@ def list_articles(
     if category_id:
         q = q.filter(Article.category_id == category_id)
 
-    # Full-text search across summary, sf_case, description, solution
+    # Filter by starred state
+    if starred is True:
+        q = q.filter(Article.is_starred.is_(True))
+    elif starred is False:
+        q = q.filter(Article.is_starred.is_(False))
+
+    # Full-text search across summary, sf_case, description, solution, jira_link
     if search:
         term = f"%{search.lower()}%"
         q = q.filter(
@@ -66,7 +82,22 @@ def list_articles(
             )
         )
 
-    return q.order_by(Article.created_at.desc()).all()
+    # Total before pagination
+    total = q.count()
+
+    # Sort
+    if sort == "oldest":
+        q = q.order_by(Article.created_at.asc())
+    elif sort == "references":
+        q = q.order_by(func.coalesce(func.array_length(Article.related_page_ids, 1), 0).desc(),
+                       Article.created_at.desc())
+    elif sort == "popularity":
+        q = q.order_by(Article.view_count.desc(), Article.created_at.desc())
+    else:  # newest
+        q = q.order_by(Article.created_at.desc())
+
+    items = q.offset(offset).limit(limit).all()
+    return PagedArticles(items=items, total=total, limit=limit, offset=offset)
 
 
 # ── GET /api/knowledge/stats ──────────────────────────────────────────────────
@@ -84,7 +115,30 @@ def get_stats(db: Session = Depends(get_db)):
 
 @router.get("/{article_id}", response_model=ArticleOut)
 def get_article(article_id: str, db: Session = Depends(get_db)):
-    return _article_or_404(db, article_id)
+    article = _article_or_404(db, article_id)
+    # Increment view counter on read (best-effort — failures shouldn't break the request)
+    try:
+        article.view_count = (article.view_count or 0) + 1
+        db.commit()
+        db.refresh(article)
+    except Exception:
+        db.rollback()
+    return article
+
+
+# ── POST /api/knowledge/{id}/star ─────────────────────────────────────────────
+
+@router.post("/{article_id}/star", response_model=ArticleOut)
+def toggle_star(
+    article_id: str,
+    db: Session = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    article = _article_or_404(db, article_id)
+    article.is_starred = not bool(article.is_starred)
+    db.commit()
+    db.refresh(article)
+    return article
 
 
 # ── POST /api/knowledge ───────────────────────────────────────────────────────

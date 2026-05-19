@@ -1131,3 +1131,181 @@ mark {
     border-radius: 20px;
   }
 }
+
+/* ── Toasts ── */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: calc(100vw - 48px);
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 14px 12px 18px;
+  border-radius: 14px;
+  background: rgba(36, 27, 87, 0.94);
+  color: #fff;
+  box-shadow: 0 16px 40px rgba(20, 18, 60, 0.28);
+  font-size: 0.92rem;
+  pointer-events: auto;
+  animation: toast-in 0.22s ease-out;
+  min-width: 260px;
+  max-width: 420px;
+}
+
+.toast-success {
+  background: linear-gradient(135deg, #1f9a52, #25b663);
+}
+
+.toast-error {
+  background: linear-gradient(135deg, #c45d26, #d8732a);
+}
+
+.toast-info {
+  background: rgba(36, 27, 87, 0.94);
+}
+
+.toast-message {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.toast-action-btn {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.toast-action-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.toast-close-btn {
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: 0;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  transition: color 0.15s ease;
+}
+
+.toast-close-btn:hover {
+  color: #fff;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 600px) {
+  .toast-container {
+    bottom: 16px;
+    right: 16px;
+    left: 16px;
+  }
+  .toast {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+/* ── Star toggle ── */
+.star-toggle {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 999px;
+  color: rgba(79, 75, 112, 0.55);
+  transition: color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.star-toggle:hover {
+  color: #f5b400;
+  background: rgba(245, 180, 0, 0.08);
+  transform: scale(1.15);
+}
+
+.star-toggle-on {
+  color: #f5b400;
+}
+
+.star-toggle-on:hover {
+  color: #d49a00;
+}
+
+.sidebar-link-starred {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-star-icon {
+  font-size: 1rem;
+  line-height: 1;
+  color: #f5b400;
+}
+
+/* ── Error boundary ── */
+.error-boundary-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.error-boundary-card {
+  max-width: 560px;
+  padding: 32px;
+  text-align: left;
+}
+
+.error-boundary-card h2 {
+  margin: 4px 0 12px;
+  font-size: 1.6rem;
+  color: var(--navy);
+  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  letter-spacing: -0.025em;
+}
+
+.error-boundary-message {
+  margin: 16px 0;
+  padding: 14px;
+  border-radius: 12px;
+  background: rgba(36, 27, 87, 0.06);
+  color: var(--navy);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 200px;
+  overflow-y: auto;
+}

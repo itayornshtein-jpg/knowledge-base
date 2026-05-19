@@ -12,6 +12,8 @@ function Sidebar({
   categories = [],
   activeCategoryId,
   onCategoryChange,
+  starredOnly = false,
+  onStarredToggle,
   onManageCategories,
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -24,16 +26,31 @@ function Sidebar({
         <button
           key={f.id}
           type="button"
-          className={`sidebar-link${activeFilter === f.id && !activeCategoryId ? ' active' : ''}`}
+          className={`sidebar-link${activeFilter === f.id && !activeCategoryId && !starredOnly ? ' active' : ''}`}
           onClick={() => {
             onFilterChange(f.id);
             if (onCategoryChange) onCategoryChange(null);
           }}
-          aria-current={activeFilter === f.id && !activeCategoryId ? 'page' : undefined}
+          aria-current={activeFilter === f.id && !activeCategoryId && !starredOnly ? 'page' : undefined}
         >
           {f.label}
         </button>
       ))}
+
+      {onStarredToggle && (
+        <button
+          type="button"
+          className={`sidebar-link sidebar-link-starred${starredOnly ? ' active' : ''}`}
+          onClick={onStarredToggle}
+          aria-pressed={starredOnly}
+          title="Toggle starred-only view"
+        >
+          <span className="sidebar-star-icon" aria-hidden="true">
+            {starredOnly ? '★' : '☆'}
+          </span>
+          Starred
+        </button>
+      )}
 
       {categories.length > 0 && (
         <>

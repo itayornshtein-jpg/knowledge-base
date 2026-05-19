@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import (
-    Column, String, Text, DateTime, ForeignKey, Boolean, func
+    Column, String, Text, DateTime, ForeignKey, Boolean, Index, Integer, func
 )
 from sqlalchemy.dialects.postgresql import UUID, ARRAY
 from sqlalchemy.orm import relationship
@@ -57,9 +57,28 @@ class Article(Base):
     category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=True)
     category = relationship("Category", back_populates="articles")
 
+    # Engagement
+    is_starred = Column(Boolean, nullable=False, default=False, server_default="false")
+    view_count = Column(Integer, nullable=False, default=0, server_default="0")
+
     # Audit timestamps
     created_at = Column(DateTime(timezone=True), default=_now)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    # Functional indexes on lowercased text columns —
+    # matches the LIKE-based search in routers/knowledge.py.
+    # For very large datasets, replace with a pg_trgm GIN index.
+    __table_args__ = (
+        Index("ix_article_summary_lower", func.lower(summary)),
+        Index("ix_article_sf_case_lower", func.lower(sf_case)),
+        Index("ix_article_description_lower", func.lower(description)),
+        Index("ix_article_solution_lower", func.lower(solution)),
+        Index("ix_article_deleted_at", deleted_at),
+        Index("ix_article_category_id", category_id),
+        Index("ix_article_created_at", created_at.desc()),
+        Index("ix_article_is_starred", is_starred),
+        Index("ix_article_view_count", view_count.desc()),
+    )
 
     def __repr__(self):
         return f"<Article {self.id}: {self.summary[:40]}>"

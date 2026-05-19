@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { requestJson, normalizeEntry } from '../hooks/useEntries';
 
 function splitLines(text) {
   return text
@@ -8,8 +9,48 @@ function splitLines(text) {
 }
 
 function ArticleDetail({ entryId, entries, onClose, onEdit }) {
-  const entry = useMemo(() => entries.find((e) => e.id === entryId), [entries, entryId]);
+  // Try to find the entry in the current paginated page; fall back to a direct fetch.
+  const localEntry = useMemo(
+    () => entries.find((e) => e.id === entryId),
+    [entries, entryId]
+  );
 
+  const [fetched, setFetched] = useState(null);
+  const [isFetching, setIsFetching] = useState(false);
+  const [fetchError, setFetchError] = useState('');
+
+  useEffect(() => {
+    if (localEntry) {
+      setFetched(null);
+      setFetchError('');
+      return;
+    }
+    if (!entryId) return;
+
+    let cancelled = false;
+    setIsFetching(true);
+    setFetchError('');
+    requestJson(`/api/knowledge/${entryId}`)
+      .then((data) => {
+        if (cancelled) return;
+        setFetched(normalizeEntry(data));
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setFetchError(err.message || 'Could not load article.');
+      })
+      .finally(() => {
+        if (!cancelled) setIsFetching(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [entryId, localEntry]);
+
+  const entry = localEntry || fetched;
+
+  // Best-effort map for resolving related-page chips (limited to entries on the current page).
   const activeEntryMap = useMemo(
     () =>
       entries.reduce((m, e) => {
@@ -27,11 +68,26 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
     return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
+  if (isFetching && !entry) {
+    return (
+      <div className="detail-panel card">
+        <div className="detail-panel-nav">
+          <button type="button" className="text-action" onClick={onClose}>
+            ← Back to list
+          </button>
+        </div>
+        <div className="skeleton-line skeleton-title" />
+        <div className="skeleton-line skeleton-meta" />
+        <div className="skeleton-line skeleton-snippet" />
+      </div>
+    );
+  }
+
   if (!entry) {
     return (
       <div className="empty-state card">
         <h3>Article not found</h3>
-        <p>This page may have been deleted or the link is incorrect.</p>
+        <p>{fetchError || 'This page may have been deleted or the link is incorrect.'}</p>
         <button type="button" className="text-action" onClick={onClose}>
           ← Back to list
         </button>
@@ -104,10 +160,15 @@ function ArticleDetail({ entryId, entries, onClose, onEdit }) {
                 {ref.summary} · {ref.sf_case}
               </span>
             ))
+          ) : entry.related_page_ids.length > 0 ? (
+            <p className="helper-text">
+              {entry.related_page_ids.length} related page
+              {entry.related_page_ids.length > 1 ? 's' : ''} linked.
+            </p>
           ) : (
-            <p className="helper-text">No active related pages are linked to this article.</p>
+            <p className="helper-text">No related pages are linked to this article.</p>
           )}
-          {unresolvedCount > 0 && (
+          {unresolvedCount > 0 && resolvedReferences.length > 0 && (
             <p className="warning-text">
               {unresolvedCount} referenced page{unresolvedCount > 1 ? 's are' : ' is'} unavailable
               (archived or deleted).
